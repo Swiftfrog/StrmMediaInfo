@@ -10,6 +10,8 @@ using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
+// 新增: 这是 GetPathInfo 返回对象所在的命名空间
+using MediaBrowser.Model.MediaInfo;
 
 namespace Evermedia
 {
@@ -20,7 +22,6 @@ namespace Evermedia
         private readonly ILibraryManager _libraryManager;
         private readonly IUserManager _userManager;
 
-        // 更新构造函数以移除 IItemManager
         public MediaInfoService(
             ILogger logger, 
             IMediaEncoder mediaEncoder, 
@@ -56,9 +57,9 @@ namespace Evermedia
             }
         }
 
+        // ########## 第 1 处核心改动 ##########
         private async Task<MediaSourceInfo> ProbeAndExtractMediaInfoAsync(BaseItem item, CancellationToken cancellationToken)
         {
-            // 代码无变化
             var strmPath = item.Path;
             if (!File.Exists(strmPath))
             {
@@ -66,8 +67,7 @@ namespace Evermedia
                 return null;
             }
 
-            var realMediaPath = await File.ReadAllTextAsync(strmPath, cancellationToken);
-            realMediaPath = realMediaPath.Trim();
+            var realMediaPath = (await File.ReadAllTextAsync(strmPath, cancellationToken)).Trim();
 
             if (string.IsNullOrWhiteSpace(realMediaPath) || realMediaPath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
@@ -82,34 +82,32 @@ namespace Evermedia
             }
 
             _logger.Info($"Probing real media file: {realMediaPath}");
-            var mediaInfo = await _mediaEncoder.GetMediaInfo(new MediaInfoRequest
-            {
-                Path = realMediaPath,
-                ExtractChapters = true,
-                MediaType = "Video"
-            }, cancellationToken);
+            
+            // API CHANGE: 使用 GetPathInfo, 它直接接收路径字符串
+            var probeResult = await _mediaEncoder.GetPathInfo(realMediaPath, cancellationToken);
 
-            return mediaInfo.MediaSources[0];
+            if (probeResult?.MediaSources == null || probeResult.MediaSources.Count == 0)
+            {
+                _logger.Warn($"Probing did not return any media sources for {realMediaPath}");
+                return null;
+            }
+
+            return probeResult.MediaSources[0];
         }
 
         private async Task BackupMediaInfoAsync(BaseItem item, MediaSourceInfo mediaSource)
         {
-            // 代码无变化
             var backupPath = item.Path + ".medinfo";
             _logger.Info($"Backing up media info to: {backupPath}");
 
-            var model = new MediaInfoModel
-            {
-                MediaSource = mediaSource,
-            };
-
+            var model = new MediaInfoModel { MediaSource = mediaSource };
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(model, options);
 
             await File.WriteAllTextAsync(backupPath, json);
         }
 
-        // ########## 核心改动在这里 ##########
+        // ########## 第 2 处核心改动 ##########
         private async Task PersistMediaInfoToDatabase(BaseItem item, MediaSourceInfo mediaSource, CancellationToken cancellationToken)
         {
             _logger.Info($"Persisting media info to database for: {item.Name}");
@@ -120,20 +118,21 @@ namespace Evermedia
                 return;
             }
             
-            // 关键步骤 1: 将探测到的媒体源信息的路径，强制设置为 strm 文件本身的路径
-            // 这一点至关重要，否则 Emby 无法将此媒体源与当前项目关联起来
             mediaSource.Path = item.Path;
 
-            // 关键步骤 2: 创建一个新的媒体源列表，并用探测到的信息替换它
-            video.SetMediaSources(new List<MediaSourceInfo> { mediaSource });
+            // API CHANGE: 直接为 MediaSources 属性赋一个新列表
+            video.MediaSources = new List<MediaSourceInfo> { mediaSource };
             
-            // 关键步骤 3: 同时更新时长等其他元数据
             video.RunTimeTicks = mediaSource.RunTimeTicks;
 
-            // 关键步骤 4: 一次性将所有变更更新到数据库
-            await video.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken);
+            // API CHANGE: 使用 ILibraryManager.UpdateItem 来保存变更
+            // 注意：UpdateItem 是同步方法，但在后台是异步执行的。
+            // 为了保持方法签名，我们用 Task.CompletedTask 包装。
+            _libraryManager.UpdateItem(video, video.Parent, ItemUpdateType.MetadataEdit, CancellationToken.None);
             
-            _logger.Info("Successfully persisted media info and updated repository.");
+            _logger.Info("Successfully persisted media info and triggered repository update.");
+            
+            await Task.CompletedTask;
         }
     }
 }
