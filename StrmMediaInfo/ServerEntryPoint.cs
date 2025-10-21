@@ -18,12 +18,10 @@ namespace StrmMediaInfo
             _logger = logManager.GetLogger(GetType().Name);
         }
 
-        // CORRECTED: Changed from RunAsync(CancellationToken) to the synchronous Run()
         public void Run()
         {
             _logger.Info("StrmMediaInfo Plugin: Initializing...");
             
-            // Subscribe to the ItemAdded event
             _libraryManager.ItemAdded += OnLibraryManagerItemAdded;
             
             _logger.Info("StrmMediaInfo Plugin: Ready and listening for new items.");
@@ -42,13 +40,13 @@ namespace StrmMediaInfo
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in OnLibraryManagerItemAdded event handler.");
+                // CORRECTED: Changed from LogError(ex, message) to Error(message, ex)
+                _logger.Error("Error in OnLibraryManagerItemAdded event handler.", ex);
             }
         }
 
         public void Dispose()
         {
-            // Unsubscribe from the event to prevent memory leaks
             _libraryManager.ItemAdded -= OnLibraryManagerItemAdded;
         }
     }
