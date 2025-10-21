@@ -7,7 +7,6 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Dto;
-// 新增：引入 IDirectoryService
 using MediaBrowser.Model.IO;
 
 namespace Evermedia
@@ -16,14 +15,13 @@ namespace Evermedia
     {
         private readonly ILogger _logger;
         private readonly IProviderManager _providerManager;
-        private readonly IDirectoryService _directoryService; // 新增
+        private readonly IDirectoryService _directoryService;
 
-        // 构造函数：接收并保存 IDirectoryService
         public MediaInfoService(ILogger logger, IProviderManager providerManager, IDirectoryService directoryService)
         {
             _logger = logger;
             _providerManager = providerManager;
-            _directoryService = directoryService; // 新增
+            _directoryService = directoryService;
         }
 
         public async void RefreshAndBackupStrmInfo(BaseItem item, CancellationToken cancellationToken)
@@ -38,22 +36,23 @@ namespace Evermedia
 
                 _logger.Info($"Queueing metadata refresh for '{item.Name}' pointing to '{realMediaPath}'");
                 
-                // ########## 修正 1: 使用正确的构造函数 ##########
+                // 这一部分现在是正确的，因为它使用了注入的_directoryService
                 var options = new MetadataRefreshOptions(_directoryService)
                 {
                     MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
                     ForceSave = true
                 };
                 
-                // QueueRefresh 的参数签名保持不变，它们是正确的
                 _providerManager.QueueRefresh(item.InternalId, options, RefreshPriority.Normal);
                 
                 await Task.Delay(5000, cancellationToken); 
 
                 _logger.Info($"Metadata refresh queued for '{item.Name}'. Now attempting to back up info.");
 
-                // ########## 修正 2: 使用正确的方法签名 ##########
-                var mediaSources = item.GetMediaSources(false); 
+                // ########## 最终修正: 将 item 强制转换为 IHasMediaSources 接口 ##########
+                // 根据官方文档，该方法没有参数。
+                var mediaSources = ((IHasMediaSources)item).GetMediaSources(); 
+                
                 if (mediaSources.Count > 0)
                 {
                     await BackupMediaInfoAsync(item, mediaSources[0], cancellationToken);
