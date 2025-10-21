@@ -21,16 +21,19 @@ jobs:
         dotnet-version: 8.0.x
 
     - name: Restore dependencies
-      run: dotnet restore StrmMediaInfo/StrmMediaInfo.csproj
+      run: dotnet restore
+      working-directory: ./StrmMediaInfo
 
     - name: Build the project
-      run: dotnet build StrmMediaInfo/StrmMediaInfo.csproj --no-restore --configuration Release
+      run: dotnet build --no-restore --configuration Release
+      working-directory: ./StrmMediaInfo
 
     - name: Create Artifacts Directory
       run: mkdir -p ${{ github.workspace }}/artifacts/plugins
 
+    # CORRECTED: Updated the source path to the standard .NET 8 build output location.
     - name: Copy DLL to Artifacts
-      run: cp ${{ github.workspace }}/bin/Release/StrmMediaInfo.dll ${{ github.workspace }}/artifacts/plugins/
+      run: cp ${{ github.workspace }}/StrmMediaInfo/bin/Release/net8.0/StrmMediaInfo.dll ${{ github.workspace }}/artifacts/plugins/
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
