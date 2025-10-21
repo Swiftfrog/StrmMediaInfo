@@ -8,8 +8,8 @@ using MediaBrowser.Model.Serialization;
 
 namespace Evermedia
 {
-    // 移除 IHasServices, 不再需要
-    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
+    // IHasAdditionalParts is the key to registering our provider
+    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasAdditionalParts
     {
         public override string Name => "Evermedia";
         public override Guid Id => Guid.Parse("a54b9714-35ef-45e6-9915-f5a01339a44c");
@@ -19,7 +19,7 @@ namespace Evermedia
             : base(applicationPaths, xmlSerializer)
         {
         }
-        
+
         public IEnumerable<PluginPageInfo> GetPages()
         {
             return new[]
@@ -32,7 +32,11 @@ namespace Evermedia
             };
         }
         
-        // ConfigureServices 方法已完全移除
+        // This method tells Emby to load our StrmMediaSourceProvider
+        public IEnumerable<Type> GetAdditionalParts()
+        {
+            return new[] { typeof(StrmMediaSourceProvider) };
+        }
     }
 }
 

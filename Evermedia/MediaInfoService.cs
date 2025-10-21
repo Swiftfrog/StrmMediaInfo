@@ -5,90 +5,55 @@ using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Logging;
-using MediaBrowser.Controller.Providers;
-using MediaBrowser.Model.Dto;
-using MediaBrowser.Model.IO;
+using MediaBrowser.Controller.MediaEncoding;
+using MediaBrowser.Model.MediaInfo;
 
 namespace Evermedia
 {
     public class MediaInfoService
     {
         private readonly ILogger _logger;
-        private readonly IProviderManager _providerManager;
-        private readonly IDirectoryService _directoryService;
+        private readonly IMediaEncoder _mediaEncoder;
 
-        public MediaInfoService(ILogger logger, IProviderManager providerManager, IDirectoryService directoryService)
+        public MediaInfoService(ILogger logger, IMediaEncoder mediaEncoder)
         {
             _logger = logger;
-            _providerManager = providerManager;
-            _directoryService = directoryService;
+            _mediaEncoder = mediaEncoder;
         }
 
-        public async void RefreshAndBackupStrmInfo(BaseItem item, CancellationToken cancellationToken)
+        public async void ProbeAndBackupStrmInfo(BaseItem item, CancellationToken cancellationToken)
         {
             try
             {
                 var realMediaPath = await GetLocalPathFromStrm(item.Path, cancellationToken);
-                if (string.IsNullOrEmpty(realMediaPath))
+                if (string.IsNullOrEmpty(realMediaPath)) return;
+
+                _logger.Info($"Probing real media path for '{item.Name}': {realMediaPath}");
+
+                // The correct API call to probe a file
+                var request = new MediaInfoRequest { FilePath = realMediaPath };
+                var mediaInfo = await _mediaEncoder.GetMediaInfo(request, cancellationToken);
+                
+                if (mediaInfo?.MediaSources == null || mediaInfo.MediaSources.Count == 0)
                 {
+                    _logger.Warn($"Probing did not return any media sources for {realMediaPath}");
                     return;
                 }
 
-                _logger.Info($"Queueing metadata refresh for '{item.Name}' pointing to '{realMediaPath}'");
-                
-                // 这一部分现在是正确的，因为它使用了注入的_directoryService
-                var options = new MetadataRefreshOptions(_directoryService)
-                {
-                    MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
-                    ForceSave = true
-                };
-                
-                _providerManager.QueueRefresh(item.InternalId, options, RefreshPriority.Normal);
-                
-                await Task.Delay(5000, cancellationToken); 
-
-                _logger.Info($"Metadata refresh queued for '{item.Name}'. Now attempting to back up info.");
-
-                // ########## 最终修正: 将 item 强制转换为 IHasMediaSources 接口 ##########
-                // 根据官方文档，该方法没有参数。
-                var mediaSources = ((IHasMediaSources)item).GetMediaSources(); 
-                
-                if (mediaSources.Count > 0)
-                {
-                    await BackupMediaInfoAsync(item, mediaSources[0], cancellationToken);
-                }
-                else
-                {
-                    _logger.Warn($"No media sources found for '{item.Name}' after refresh. The item may still be processing.");
-                }
+                var mediaSource = mediaInfo.MediaSources[0];
+                await BackupMediaInfoAsync(item, mediaSource, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.Error($"Error in RefreshAndBackupStrmInfo for {item.Path}: {ex.Message}", ex);
+                _logger.Error($"Error in ProbeAndBackupStrmInfo for {item.Path}: {ex.Message}", ex);
             }
         }
 
         private async Task<string> GetLocalPathFromStrm(string strmPath, CancellationToken cancellationToken)
         {
-            if (!File.Exists(strmPath))
-            {
-                _logger.Warn($"Strm file not found at {strmPath}");
-                return null;
-            }
-
+            if (!File.Exists(strmPath)) return null;
             var realMediaPath = (await File.ReadAllTextAsync(strmPath, cancellationToken)).Trim();
-
-            if (string.IsNullOrWhiteSpace(realMediaPath) || realMediaPath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.Info($"Skipping remote or empty strm: {realMediaPath}");
-                return null;
-            }
-
-            if (!File.Exists(realMediaPath))
-            {
-                 _logger.Warn($"Real media file pointed to by strm does not exist: {realMediaPath}");
-                 return null;
-            }
+            if (string.IsNullOrWhiteSpace(realMediaPath) || !File.Exists(realMediaPath)) return null;
             return realMediaPath;
         }
         
