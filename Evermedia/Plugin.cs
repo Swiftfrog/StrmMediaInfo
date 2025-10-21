@@ -1,15 +1,16 @@
 using System;
-using System.Collections.Generic; // 新增：解决 IEnumerable<> 找不到的问题
+using System.Collections.Generic;
 using Evermedia.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
-using Microsoft.Extensions.DependencyInjection; // 新增：解决 IServiceCollection 和 AddScoped 找不到的问题
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Evermedia
 {
-    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
+    // 1. 新增 IHasServices 接口
+    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasServices
     {
         public override string Name => "Evermedia";
         public override Guid Id => Guid.Parse("a54b9714-35ef-45e6-9915-f5a01339a44c");
@@ -19,8 +20,7 @@ namespace Evermedia
             : base(applicationPaths, xmlSerializer)
         {
         }
-
-        // 现在编译器可以正确识别 IEnumerable<>
+        
         public IEnumerable<PluginPageInfo> GetPages()
         {
             return new[]
@@ -34,9 +34,10 @@ namespace Evermedia
             };
         }
         
-        // 现在编译器可以正确识别 IServiceCollection 和 AddScoped
-        public override void ConfigureServices(IServiceCollection serviceCollection)
+        // 2. 移除 "override" 关键字
+        public void ConfigureServices(IServiceCollection serviceCollection)
         {
+            // 这是实现 IHasServices 接口的方法
             serviceCollection.AddScoped<MediaInfoService>();
         }
     }
