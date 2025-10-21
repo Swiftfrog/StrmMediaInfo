@@ -7,6 +7,8 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Dto;
+// 新增：引入 IDirectoryService
+using MediaBrowser.Model.IO;
 
 namespace Evermedia
 {
@@ -14,11 +16,14 @@ namespace Evermedia
     {
         private readonly ILogger _logger;
         private readonly IProviderManager _providerManager;
+        private readonly IDirectoryService _directoryService; // 新增
 
-        public MediaInfoService(ILogger logger, IProviderManager providerManager)
+        // 构造函数：接收并保存 IDirectoryService
+        public MediaInfoService(ILogger logger, IProviderManager providerManager, IDirectoryService directoryService)
         {
             _logger = logger;
             _providerManager = providerManager;
+            _directoryService = directoryService; // 新增
         }
 
         public async void RefreshAndBackupStrmInfo(BaseItem item, CancellationToken cancellationToken)
@@ -33,27 +38,22 @@ namespace Evermedia
 
                 _logger.Info($"Queueing metadata refresh for '{item.Name}' pointing to '{realMediaPath}'");
                 
-                // ########## 修正 1: 使用无参数构造函数 ##########
-                var options = new MetadataRefreshOptions
+                // ########## 修正 1: 使用正确的构造函数 ##########
+                var options = new MetadataRefreshOptions(_directoryService)
                 {
                     MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
                     ForceSave = true
                 };
                 
-                // ########## 修正 2: 使用正确的 QueueRefresh 参数 ##########
-                // 参数1: item.InternalId (long)
-                // 参数3: RefreshPriority.Normal (enum)
+                // QueueRefresh 的参数签名保持不变，它们是正确的
                 _providerManager.QueueRefresh(item.InternalId, options, RefreshPriority.Normal);
                 
-                // 我们不再 await QueueRefresh，因为它是一个即发即忘的后台任务排队。
-                // 我们需要一种方式等待它完成。最简单的方式是短暂地延迟一下。
-                // 注意：这是一个简化的实现。一个更复杂的实现会使用事件来确认刷新完成。
-                await Task.Delay(5000, cancellationToken); // 等待 5 秒，让 Emby 有时间完成刷新
+                await Task.Delay(5000, cancellationToken); 
 
                 _logger.Info($"Metadata refresh queued for '{item.Name}'. Now attempting to back up info.");
 
-                // ########## 修正 3: 使用无参数的 GetMediaSources ##########
-                var mediaSources = item.GetMediaSources(); 
+                // ########## 修正 2: 使用正确的方法签名 ##########
+                var mediaSources = item.GetMediaSources(false); 
                 if (mediaSources.Count > 0)
                 {
                     await BackupMediaInfoAsync(item, mediaSources[0], cancellationToken);

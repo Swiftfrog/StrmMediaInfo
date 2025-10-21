@@ -5,8 +5,9 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
-// 新增：引入 ProviderManager
 using MediaBrowser.Controller.Providers;
+// 新增：引入 IDirectoryService
+using MediaBrowser.Model.IO;
 
 namespace Evermedia
 {
@@ -16,18 +17,19 @@ namespace Evermedia
         private readonly ILogger _logger;
         private readonly MediaInfoService _mediaInfoService;
 
-        // 构造函数：注入正确的服务 IProviderManager
+        // 构造函数：注入所有需要的服务，包括 IDirectoryService
         public ServerEntryPoint(
             ILogger logger, 
             ILibraryManager libraryManager,
-            IProviderManager providerManager // 不再需要 IMediaEncoder, IUserManager 等
+            IProviderManager providerManager,
+            IDirectoryService directoryService // 新增
             )
         {
             _logger = logger;
             _libraryManager = libraryManager;
 
-            // 创建服务实例
-            _mediaInfoService = new MediaInfoService(logger, providerManager);
+            // 创建服务实例，并将 directoryService 传递进去
+            _mediaInfoService = new MediaInfoService(logger, providerManager, directoryService);
         }
 
         public void Run()
@@ -50,7 +52,6 @@ namespace Evermedia
             }
 
             _logger.Info($"Evermedia Plugin: Event triggered for '{item.Name}'. Processing...");
-            // 直接调用我们的服务
             _mediaInfoService.RefreshAndBackupStrmInfo(item, CancellationToken.None);
         }
 
