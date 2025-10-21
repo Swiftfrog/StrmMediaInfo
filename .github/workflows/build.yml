@@ -31,9 +31,9 @@ jobs:
     - name: Create Artifacts Directory
       run: mkdir -p ${{ github.workspace }}/artifacts/plugins
 
-    # CORRECTED: Updated the source path to the standard .NET 8 build output location.
+    # 修订：移除了源路径中的 '/net8.0'，使其与实际编译输出路径完全匹配。
     - name: Copy DLL to Artifacts
-      run: cp ${{ github.workspace }}/StrmMediaInfo/bin/Release/net8.0/StrmMediaInfo.dll ${{ github.workspace }}/artifacts/plugins/
+      run: cp ${{ github.workspace }}/StrmMediaInfo/bin/Release/StrmMediaInfo.dll ${{ github.workspace }}/artifacts/plugins/
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
