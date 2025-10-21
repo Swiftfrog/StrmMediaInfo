@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Logging;
-// 新增：引入 ProviderManager 和正确的 DTO
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Dto;
 
@@ -16,7 +15,6 @@ namespace Evermedia
         private readonly ILogger _logger;
         private readonly IProviderManager _providerManager;
 
-        // 构造函数：注入正确的服务
         public MediaInfoService(ILogger logger, IProviderManager providerManager)
         {
             _logger = logger;
@@ -27,38 +25,42 @@ namespace Evermedia
         {
             try
             {
-                // 步骤 1: 检查 strm 文件是否指向本地文件，如果是远程则跳过
                 var realMediaPath = await GetLocalPathFromStrm(item.Path, cancellationToken);
                 if (string.IsNullOrEmpty(realMediaPath))
                 {
-                    return; // 日志已在 GetLocalPathFromStrm 中记录
+                    return;
                 }
 
-                // 步骤 2: 告诉 Emby 强制刷新这个项目。
-                // Emby 会自动探测 realMediaPath 并将结果存入数据库。
-                // 这是 API 的核心用法。
                 _logger.Info($"Queueing metadata refresh for '{item.Name}' pointing to '{realMediaPath}'");
-                var options = new MetadataRefreshOptions(new DirectoryService())
+                
+                // ########## 修正 1: 使用无参数构造函数 ##########
+                var options = new MetadataRefreshOptions
                 {
                     MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
-                    ForceSave = true // 确保新探测的信息被保存
+                    ForceSave = true
                 };
                 
-                // QueueRefresh 会在后台执行，我们 await 等待它完成
-                await _providerManager.QueueRefresh(item.Id, options, cancellationToken);
-                _logger.Info($"Metadata refresh completed for '{item.Name}'.");
+                // ########## 修正 2: 使用正确的 QueueRefresh 参数 ##########
+                // 参数1: item.InternalId (long)
+                // 参数3: RefreshPriority.Normal (enum)
+                _providerManager.QueueRefresh(item.InternalId, options, RefreshPriority.Normal);
+                
+                // 我们不再 await QueueRefresh，因为它是一个即发即忘的后台任务排队。
+                // 我们需要一种方式等待它完成。最简单的方式是短暂地延迟一下。
+                // 注意：这是一个简化的实现。一个更复杂的实现会使用事件来确认刷新完成。
+                await Task.Delay(5000, cancellationToken); // 等待 5 秒，让 Emby 有时间完成刷新
 
+                _logger.Info($"Metadata refresh queued for '{item.Name}'. Now attempting to back up info.");
 
-                // 步骤 3: 刷新完成后，从项目中读取刚刚被保存的媒体信息，并备份到 .medinfo 文件
-                // API CHANGE: 使用 item.GetMediaSources() 来读取信息
-                var mediaSources = item.GetMediaSources(false); 
+                // ########## 修正 3: 使用无参数的 GetMediaSources ##########
+                var mediaSources = item.GetMediaSources(); 
                 if (mediaSources.Count > 0)
                 {
-                    await BackupMediaInfoAsync(item, mediaSources[0]);
+                    await BackupMediaInfoAsync(item, mediaSources[0], cancellationToken);
                 }
                 else
                 {
-                    _logger.Warn($"No media sources found for '{item.Name}' after refresh.");
+                    _logger.Warn($"No media sources found for '{item.Name}' after refresh. The item may still be processing.");
                 }
             }
             catch (Exception ex)
@@ -91,7 +93,7 @@ namespace Evermedia
             return realMediaPath;
         }
         
-        private async Task BackupMediaInfoAsync(BaseItem item, MediaSourceInfo mediaSource)
+        private async Task BackupMediaInfoAsync(BaseItem item, MediaSourceInfo mediaSource, CancellationToken cancellationToken)
         {
             var backupPath = item.Path + ".medinfo";
             _logger.Info($"Backing up media info to: {backupPath}");
@@ -100,7 +102,9 @@ namespace Evermedia
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(model, options);
 
-            await File.WriteAllTextAsync(backupPath, json);
+            await File.WriteAllTextAsync(backupPath, json, cancellationToken);
         }
     }
 }
+
+
