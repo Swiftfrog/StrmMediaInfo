@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -17,21 +18,18 @@ namespace Evermedia
         private readonly ILogger _logger;
         private readonly IMediaEncoder _mediaEncoder;
         private readonly ILibraryManager _libraryManager;
-        private readonly IItemManager _itemManager;
         private readonly IUserManager _userManager;
 
-        // 更新构造函数以接收所有必要的服务
+        // 更新构造函数以移除 IItemManager
         public MediaInfoService(
             ILogger logger, 
             IMediaEncoder mediaEncoder, 
-            ILibraryManager libraryManager, 
-            IItemManager itemManager, 
+            ILibraryManager libraryManager,
             IUserManager userManager)
         {
             _logger = logger;
             _mediaEncoder = mediaEncoder;
             _libraryManager = libraryManager;
-            _itemManager = itemManager;
             _userManager = userManager;
         }
 
@@ -60,6 +58,7 @@ namespace Evermedia
 
         private async Task<MediaSourceInfo> ProbeAndExtractMediaInfoAsync(BaseItem item, CancellationToken cancellationToken)
         {
+            // 代码无变化
             var strmPath = item.Path;
             if (!File.Exists(strmPath))
             {
@@ -95,13 +94,13 @@ namespace Evermedia
 
         private async Task BackupMediaInfoAsync(BaseItem item, MediaSourceInfo mediaSource)
         {
+            // 代码无变化
             var backupPath = item.Path + ".medinfo";
             _logger.Info($"Backing up media info to: {backupPath}");
 
             var model = new MediaInfoModel
             {
                 MediaSource = mediaSource,
-                // Chapters can be added here if needed
             };
 
             var options = new JsonSerializerOptions { WriteIndented = true };
@@ -110,34 +109,30 @@ namespace Evermedia
             await File.WriteAllTextAsync(backupPath, json);
         }
 
+        // ########## 核心改动在这里 ##########
         private async Task PersistMediaInfoToDatabase(BaseItem item, MediaSourceInfo mediaSource, CancellationToken cancellationToken)
         {
             _logger.Info($"Persisting media info to database for: {item.Name}");
 
-            item.RunTimeTicks = mediaSource.RunTimeTicks;
-            
-            // 使用 ItemManager 来更新媒体流信息
-            var video = item as Video;
-            if (video == null)
+            if (item is not Video video)
             {
                 _logger.Warn("Item is not a Video type, cannot save media streams.");
                 return;
             }
             
-            var DtoMediaSource = new MediaSourceInfo
-            {
-                 Id = mediaSource.Id,
-                 Path = item.Path, // 关键：Path 必须是 strm 文件本身的路径
-                 Protocol = mediaSource.Protocol,
-                 RunTimeTicks = mediaSource.RunTimeTicks,
-                 Container = mediaSource.Container,
-                 // ... 复制其他需要的字段
-            };
-            
-            _itemManager.SaveMediaStreams(video, new DtoOptions(true), new []{ DtoMediaSource });
+            // 关键步骤 1: 将探测到的媒体源信息的路径，强制设置为 strm 文件本身的路径
+            // 这一点至关重要，否则 Emby 无法将此媒体源与当前项目关联起来
+            mediaSource.Path = item.Path;
 
-            // 更新项目以刷新UI
-            await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken);
+            // 关键步骤 2: 创建一个新的媒体源列表，并用探测到的信息替换它
+            video.SetMediaSources(new List<MediaSourceInfo> { mediaSource });
+            
+            // 关键步骤 3: 同时更新时长等其他元数据
+            video.RunTimeTicks = mediaSource.RunTimeTicks;
+
+            // 关键步骤 4: 一次性将所有变更更新到数据库
+            await video.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken);
+            
             _logger.Info("Successfully persisted media info and updated repository.");
         }
     }

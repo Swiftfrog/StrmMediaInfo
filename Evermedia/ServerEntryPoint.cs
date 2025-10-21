@@ -14,23 +14,22 @@ namespace Evermedia
     {
         private readonly ILibraryManager _libraryManager;
         private readonly ILogger _logger;
-        private readonly MediaInfoService _mediaInfoService; // 存储我们自己服务的实例
+        private readonly MediaInfoService _mediaInfoService;
 
-        // 构造函数：请求所有需要的官方服务
+        // 构造函数：移除 IItemManager
         public ServerEntryPoint(
             ILogger logger, 
             ILibraryManager libraryManager, 
             ISessionManager sessionManager, 
-            IMediaEncoder mediaEncoder, 
-            IItemManager itemManager,
+            IMediaEncoder mediaEncoder,
             IUserManager userManager
             )
         {
             _logger = logger;
             _libraryManager = libraryManager;
 
-            // 关键改动：在这里手动创建我们的服务实例，并将所有依赖传递进去
-            _mediaInfoService = new MediaInfoService(logger, mediaEncoder, libraryManager, itemManager, userManager);
+            // 关键改动：创建服务实例时不再传递 itemManager
+            _mediaInfoService = new MediaInfoService(logger, mediaEncoder, libraryManager, userManager);
         }
 
         public void Run()
@@ -47,6 +46,7 @@ namespace Evermedia
 
         private void OnLibraryManagerItemUpdated(object sender, ItemChangeEventArgs e)
         {
+            // 代码无变化
             if (e.Item is not BaseItem item || string.IsNullOrEmpty(item.Path) || !item.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
             {
                 return;
@@ -58,6 +58,7 @@ namespace Evermedia
 
         private void OnLibraryManagerItemAdded(object sender, ItemChangeEventArgs e)
         {
+            // 代码无变化
             if (e.Item is not BaseItem item || string.IsNullOrEmpty(item.Path) || !item.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
             {
                 return;
