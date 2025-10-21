@@ -1,10 +1,12 @@
 using System;
 using System.Threading;
-using System.Threading.Tasks;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Plugins;
+using MediaBrowser.Controller.Session;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
+using MediaBrowser.Controller.MediaEncoding;
 
 namespace Evermedia
 {
@@ -12,53 +14,59 @@ namespace Evermedia
     {
         private readonly ILibraryManager _libraryManager;
         private readonly ILogger _logger;
-        private readonly MediaInfoService _mediaInfoService;
+        private readonly MediaInfoService _mediaInfoService; // 存储我们自己服务的实例
 
-        // 新增：通过依赖注入获取 MediaInfoService 实例
-        public ServerEntryPoint(ILibraryManager libraryManager, ILogManager logManager, MediaInfoService mediaInfoService)
+        // 构造函数：请求所有需要的官方服务
+        public ServerEntryPoint(
+            ILogger logger, 
+            ILibraryManager libraryManager, 
+            ISessionManager sessionManager, 
+            IMediaEncoder mediaEncoder, 
+            IItemManager itemManager,
+            IUserManager userManager
+            )
         {
+            _logger = logger;
             _libraryManager = libraryManager;
-            _logger = logManager.GetLogger(GetType().Name);
-            _mediaInfoService = mediaInfoService;
+
+            // 关键改动：在这里手动创建我们的服务实例，并将所有依赖传递进去
+            _mediaInfoService = new MediaInfoService(logger, mediaEncoder, libraryManager, itemManager, userManager);
         }
 
         public void Run()
         {
-            _logger.Info("Evermedia Plugin: Initializing...");
-            _libraryManager.ItemAdded += OnLibraryManagerItemChanged;
-            _libraryManager.ItemUpdated += OnLibraryManagerItemChanged;
-            _logger.Info("Evermedia Plugin: Ready and listening for item additions and updates.");
-        }
-
-        // 将两个事件处理器合并，并改为 async
-        private async void OnLibraryManagerItemChanged(object sender, ItemChangeEventArgs e)
-        {
-            await ProcessStrmItem(e.Item);
-        }
-
-        // 共享的核心处理逻辑，调用 MediaInfoService
-        private async Task ProcessStrmItem(BaseItem item)
-        {
-            try
-            {
-                if (item != null && !string.IsNullOrEmpty(item.Path) && item.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.Info($"Processing .strm file: '{item.Name}'.");
-                    // 调用核心服务来处理探测和备份
-                    await _mediaInfoService.ProbeAndBackupMediaInfoAsync(item, CancellationToken.None);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Error processing item '{item?.Name}'.", ex);
-            }
+            _libraryManager.ItemAdded += OnLibraryManagerItemAdded;
+            _libraryManager.ItemUpdated += OnLibraryManagerItemUpdated;
         }
 
         public void Dispose()
         {
-            _libraryManager.ItemAdded -= OnLibraryManagerItemChanged;
-            _libraryManager.ItemUpdated -= OnLibraryManagerItemChanged;
+            _libraryManager.ItemAdded -= OnLibraryManagerItemAdded;
+            _libraryManager.ItemUpdated -= OnLibraryManagerItemUpdated;
+        }
+
+        private void OnLibraryManagerItemUpdated(object sender, ItemChangeEventArgs e)
+        {
+            if (e.Item is not BaseItem item || string.IsNullOrEmpty(item.Path) || !item.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            
+            _logger.Info($"Evermedia Plugin: Item updated event for '{item.Name}'. Processing...");
+            _mediaInfoService.ProcessStrmFile(item, CancellationToken.None);
+        }
+
+        private void OnLibraryManagerItemAdded(object sender, ItemChangeEventArgs e)
+        {
+            if (e.Item is not BaseItem item || string.IsNullOrEmpty(item.Path) || !item.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _logger.Info($"Evermedia Plugin: Item added event for '{item.Name}'. Processing...");
+            _mediaInfoService.ProcessStrmFile(item, CancellationToken.None);
         }
     }
 }
+
 

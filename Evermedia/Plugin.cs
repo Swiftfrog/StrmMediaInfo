@@ -5,12 +5,11 @@ using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Evermedia
 {
-    // 1. 新增 IHasServices 接口
-    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasServices
+    // 移除 IHasServices, 不再需要
+    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     {
         public override string Name => "Evermedia";
         public override Guid Id => Guid.Parse("a54b9714-35ef-45e6-9915-f5a01339a44c");
@@ -28,18 +27,12 @@ namespace Evermedia
                 new PluginPageInfo
                 {
                     Name = "evermedia",
-                    EmbeddedResourcePath = GetType().Namespace + ".Configuration.config.html",
-                    EnableInMainMenu = true
+                    EmbeddedResourcePath = GetType().Namespace + ".Configuration.config.html"
                 }
             };
         }
         
-        // 2. 移除 "override" 关键字
-        public void ConfigureServices(IServiceCollection serviceCollection)
-        {
-            // 这是实现 IHasServices 接口的方法
-            serviceCollection.AddScoped<MediaInfoService>();
-        }
+        // ConfigureServices 方法已完全移除
     }
 }
 

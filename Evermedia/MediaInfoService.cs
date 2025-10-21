@@ -1,118 +1,146 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
 
 namespace Evermedia
 {
-    /// <summary>
-    /// 核心服务，负责探测、备份和恢复 .strm 文件的媒体信息。
-    /// </summary>
     public class MediaInfoService
     {
         private readonly ILogger _logger;
         private readonly IMediaEncoder _mediaEncoder;
         private readonly ILibraryManager _libraryManager;
-        
-        // JSON 序列化选项
-        private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+        private readonly IItemManager _itemManager;
+        private readonly IUserManager _userManager;
 
-        public MediaInfoService(ILogManager logManager, IMediaEncoder mediaEncoder, ILibraryManager libraryManager)
+        // 更新构造函数以接收所有必要的服务
+        public MediaInfoService(
+            ILogger logger, 
+            IMediaEncoder mediaEncoder, 
+            ILibraryManager libraryManager, 
+            IItemManager itemManager, 
+            IUserManager userManager)
         {
-            _logger = logManager.GetLogger(GetType().Name);
+            _logger = logger;
             _mediaEncoder = mediaEncoder;
             _libraryManager = libraryManager;
+            _itemManager = itemManager;
+            _userManager = userManager;
         }
 
-        /// <summary>
-        /// 主方法：探测、备份媒体信息，并将其持久化到 Emby 数据库。
-        /// </summary>
-        public async Task ProbeAndBackupMediaInfoAsync(BaseItem item, CancellationToken cancellationToken)
+        public async void ProcessStrmFile(BaseItem item, CancellationToken cancellationToken)
         {
-            // 步骤 1: 读取 .strm 文件获取真实媒体路径
-            string mediaPath;
             try
             {
-                mediaPath = await File.ReadAllTextAsync(item.Path, cancellationToken);
-                mediaPath = mediaPath.Trim();
-                if (string.IsNullOrWhiteSpace(mediaPath) || mediaPath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                _logger.Info($"Processing .strm file: {item.Path}");
+
+                var mediaInfoResult = await ProbeAndExtractMediaInfoAsync(item, cancellationToken);
+                if (mediaInfoResult == null)
                 {
-                    _logger.Info($"Skipping probe for remote or empty .strm file: {item.Path}");
+                    _logger.Warn($"Failed to probe media info for {item.Path}.");
                     return;
                 }
+
+                await BackupMediaInfoAsync(item, mediaInfoResult);
+
+                await PersistMediaInfoToDatabase(item, mediaInfoResult, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.Error($"Failed to read .strm file content: {item.Path}", ex);
-                return;
+                _logger.Error($"Error processing .strm file {item.Path}: {ex.Message}", ex);
+            }
+        }
+
+        private async Task<MediaSourceInfo> ProbeAndExtractMediaInfoAsync(BaseItem item, CancellationToken cancellationToken)
+        {
+            var strmPath = item.Path;
+            if (!File.Exists(strmPath))
+            {
+                _logger.Warn($"Strm file not found at {strmPath}");
+                return null;
             }
 
-            // 步骤 2: 调用 Emby 的 MediaEncoder 探测真实媒体信息
-            _logger.Info($"Probing media info for: {mediaPath}");
-            MediaBrowser.Model.MediaInfo.MediaInfoResult probedInfo;
-            try
+            var realMediaPath = await File.ReadAllTextAsync(strmPath, cancellationToken);
+            realMediaPath = realMediaPath.Trim();
+
+            if (string.IsNullOrWhiteSpace(realMediaPath) || realMediaPath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
-                probedInfo = await _mediaEncoder.GetMediaInfo(new MediaInfo.MediaInfoRequest { Path = mediaPath }, cancellationToken);
-                if (probedInfo?.MediaSources == null || probedInfo.MediaSources.Count == 0)
-                {
-                    _logger.Warn($"Probe result for '{mediaPath}' is empty or invalid.");
-                    return;
-                }
+                _logger.Info($"Skipping probe for remote or empty strm: {realMediaPath}");
+                return null;
             }
-            catch (Exception ex)
+
+            if (!File.Exists(realMediaPath))
             {
-                _logger.Error($"Error probing media file '{mediaPath}'.", ex);
+                 _logger.Warn($"Real media file pointed to by strm does not exist: {realMediaPath}");
+                 return null;
+            }
+
+            _logger.Info($"Probing real media file: {realMediaPath}");
+            var mediaInfo = await _mediaEncoder.GetMediaInfo(new MediaInfoRequest
+            {
+                Path = realMediaPath,
+                ExtractChapters = true,
+                MediaType = "Video"
+            }, cancellationToken);
+
+            return mediaInfo.MediaSources[0];
+        }
+
+        private async Task BackupMediaInfoAsync(BaseItem item, MediaSourceInfo mediaSource)
+        {
+            var backupPath = item.Path + ".medinfo";
+            _logger.Info($"Backing up media info to: {backupPath}");
+
+            var model = new MediaInfoModel
+            {
+                MediaSource = mediaSource,
+                // Chapters can be added here if needed
+            };
+
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            var json = JsonSerializer.Serialize(model, options);
+
+            await File.WriteAllTextAsync(backupPath, json);
+        }
+
+        private async Task PersistMediaInfoToDatabase(BaseItem item, MediaSourceInfo mediaSource, CancellationToken cancellationToken)
+        {
+            _logger.Info($"Persisting media info to database for: {item.Name}");
+
+            item.RunTimeTicks = mediaSource.RunTimeTicks;
+            
+            // 使用 ItemManager 来更新媒体流信息
+            var video = item as Video;
+            if (video == null)
+            {
+                _logger.Warn("Item is not a Video type, cannot save media streams.");
                 return;
             }
             
-            var mediaSource = probedInfo.MediaSources[0];
-
-            // 步骤 3: 将探测结果序列化并备份到 .medinfo 文件
-            try
+            var DtoMediaSource = new MediaSourceInfo
             {
-                var backupModel = new MediaInfoModel { MediaSource = mediaSource };
-                var json = JsonSerializer.Serialize(backupModel, JsonOptions);
-                var backupPath = item.Path + ".medinfo";
-                await File.WriteAllTextAsync(backupPath, json, cancellationToken);
-                _logger.Info($"Successfully backed up media info to: {backupPath}");
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Failed to backup media info for item: {item.Name}", ex);
-                // 即使备份失败，我们仍然继续尝试更新数据库
-            }
+                 Id = mediaSource.Id,
+                 Path = item.Path, // 关键：Path 必须是 strm 文件本身的路径
+                 Protocol = mediaSource.Protocol,
+                 RunTimeTicks = mediaSource.RunTimeTicks,
+                 Container = mediaSource.Container,
+                 // ... 复制其他需要的字段
+            };
+            
+            _itemManager.SaveMediaStreams(video, new DtoOptions(true), new []{ DtoMediaSource });
 
-            // 步骤 4: 将媒体信息持久化到 Emby 数据库 (关键步骤!)
-            try
-            {
-                _logger.Info($"Updating database for item: {item.Name} (ID: {item.Id})");
-
-                // 更新媒体流信息
-                await _libraryManager.SaveMediaStreams(item.Id, mediaSource.MediaStreams);
-
-                // 更新 Item 的核心属性
-                item.RunTimeTicks = mediaSource.RunTimeTicks;
-                item.HasSubtitles = mediaSource.MediaStreams.Any(s => s.Type == MediaStreamType.Subtitle);
-                // 可以根据需要添加更多字段，例如 3D 格式等
-                // item.Video3DFormat = mediaSource.Video3DFormat;
-
-                // 通知 Emby 刷新这个项目
-                await _libraryManager.UpdateItem(item, item.Parent, ItemUpdateType.MetadataEdit, cancellationToken);
-                
-                _logger.Info($"Database update complete for: {item.Name}");
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"Failed to persist media info to database for item: {item.Name}", ex);
-            }
+            // 更新项目以刷新UI
+            await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken);
+            _logger.Info("Successfully persisted media info and updated repository.");
         }
     }
 }
+
 
