@@ -1,6 +1,6 @@
 using MediaBrowser.Model.Plugins;
 
-namespace StrmMediaInfo.Configuration
+namespace Evermedia.Configuration
 {
     public class PluginConfiguration : BasePluginConfiguration
     {

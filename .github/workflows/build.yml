@@ -1,10 +1,10 @@
-name: Build Emby Plugin
+name: Build Evermedia Plugin
 
 on:
   push:
-    branches: [ main, v1]
+    branches: [ main, v1 ]
   pull_request:
-    branches: [ main, v1]
+    branches: [ main, v1 ]
   workflow_dispatch:
 
 jobs:
@@ -20,25 +20,28 @@ jobs:
       with:
         dotnet-version: 8.0.x
 
+    # 修订：将工作目录指向 'Evermedia'
     - name: Restore dependencies
       run: dotnet restore
-      working-directory: ./StrmMediaInfo
+      working-directory: ./Evermedia
 
+    # 修订：将工作目录指向 'Evermedia'
     - name: Build the project
       run: dotnet build --no-restore --configuration Release
-      working-directory: ./StrmMediaInfo
+      working-directory: ./Evermedia
 
     - name: Create Artifacts Directory
       run: mkdir -p ${{ github.workspace }}/artifacts/plugins
 
-    # 修订：移除了源路径中的 '/net8.0'，使其与实际编译输出路径完全匹配。
+    # 修订：更新源路径和 .dll 文件名
     - name: Copy DLL to Artifacts
-      run: cp ${{ github.workspace }}/StrmMediaInfo/bin/Release/StrmMediaInfo.dll ${{ github.workspace }}/artifacts/plugins/
+      run: cp ${{ github.workspace }}/Evermedia/bin/Release/Evermedia.dll ${{ github.workspace }}/artifacts/plugins/
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: StrmMediaInfo-Plugin
+        # 修订：更新构建产物的名称
+        name: Evermedia-Plugin
         path: ${{ github.workspace }}/artifacts/
 
 
