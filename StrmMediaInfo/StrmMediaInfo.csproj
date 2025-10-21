@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <!-- 已更新 SDK 版本以匹配 4.9.1.80 -->
-    <PackageReference Include="Emby.Server.Sdk" Version="4.9.1.80" />
+    <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.1.80" />
   </ItemGroup>
   
   <ItemGroup>
